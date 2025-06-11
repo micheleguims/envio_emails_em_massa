@@ -1,15 +1,20 @@
+# INFORMAÇÕES:
+# Esse código considera uma planilha com uma aba para Dados (NOME | EMAIL | FUNCAO | LOCAL | Enviar) e uma para a mensagem em HTML (FUNCAO | TEXTO).
+# Também utiliza uma pasta denominada "anexos" com subpastas com nome da função e os anexos desejados.
+
 import pandas as pd
 import os
 import win32com.client as win32
 from datetime import datetime
 
-# === ⚙️ CONFIGURAÇÕES GERAIS ===
-ARQUIVO_PLANILHA = r"C:\PPT\EvioEmails\BASE_GE_24_(Envio_Emails).xlsx"
-ABA = "Base_GE_2024"
-CAMINHO_ANEXO = r"C:\PPT\EvioEmails\Exemplo de Anexo.pdf"
+# === ⚙️ CONFIGURAÇÕES ===
+ARQUIVO_PLANILHA = r"C:\PPT\EnvioEmails\BASE_GE_24_(Envio_Emails).xlsx"
+ABA_DADOS = "Base_GE_2024"
+ABA_HTML = "Corpo_HTML"
+PASTA_ANEXOS = r"C:\PPT\EnvioEmails\anexos"  # <- caminho base dos anexos
 
-# === 🔍 MODO DE EXECUÇÃO (DISPLAY / SEND) ===
-ENVIAR = False  # Inicializa como falso
+# === 🔍 MODO DE EXECUÇÃO ===
+ENVIAR = False
 
 print("\n📤 Qual modo deseja executar?")
 print("[1] Exibir os e-mails (modo seguro)")
@@ -34,97 +39,106 @@ while True:
 
 print(f"💡 EXECUTANDO EM: {'ENVIO REAL (Send)' if ENVIAR else 'DISPLAY (modo teste)'}\n")
 
-# === 💌 TEMPLATE DE E-MAIL ===
-TEMPLATE_HTML = """
-<h2> Prezado(a) {funcao}: <em><span style="color:pink;">{nome}</span></em>, </h2>
-<br>
-<p>Informamos que a avaliação irá iniciar em 11/06/2025.</p>
-<br>
-<p>Atenciosamente,<br>
-<strong>Equipe Avaliação e Desempenho.</strong></p>
-"""
+# === 📊 LER PLANILHAS ===
+df_dados = pd.read_excel(ARQUIVO_PLANILHA, sheet_name=ABA_DADOS, engine='openpyxl')
+df_html = pd.read_excel(ARQUIVO_PLANILHA, sheet_name=ABA_HTML, engine='openpyxl')
 
-ASSUNTO_EMAIL = "Avaliação Diretores Ciclo 2024"
+# === LIMPEZA ===
+df_dados['LOCAL'] = df_dados['LOCAL'].astype(str).str.strip()
+df_dados['FUNCAO'] = df_dados['FUNCAO'].astype(str).str.strip().str.upper()
+df_dados['Enviar'] = df_dados['Enviar'].fillna(False).astype(bool)
 
-# === 📊 LER PLANILHA ===
-df = pd.read_excel(ARQUIVO_PLANILHA, sheet_name=ABA, engine='openpyxl')
-df['LOCAL'] = df['LOCAL'].astype(str).str.strip()
-df['FUNCAO'] = df['FUNCAO'].astype(str).str.strip().str.upper()
-df['Enviar'] = df['Enviar'].fillna(False).astype(bool)
+df_html['FUNCAO'] = df_html['FUNCAO'].astype(str).str.strip().str.upper()
+df_html.set_index('FUNCAO', inplace=True)
 
-# === VALORES VÁLIDOS ===
-locais_validos = [str(i) for i in range(1, 13)] + ["NC"]
-funcoes_validas = ["DIRETOR ADJUNTO", "DIRETOR IV", "COORDENADOR", "GERENTE", "SECRETARIA"]
+# === LISTA DE LOCAIS E FUNÇÕES ===
+locais_validos = sorted(df_dados['LOCAL'].unique())
+funcoes_validas = sorted(df_dados['FUNCAO'].unique())
 
-# === SELECIONAR LOCAL ===
-print("\n📍 Lista de LOCALS disponíveis:")
-for i, local in enumerate(locais_validos, start=1):
+# === SELEÇÃO INTERATIVA ===
+print("\n📍 Locais disponíveis:")
+for i, local in enumerate(locais_validos, 1):
     print(f"[{i}] {local}")
-
 while True:
     entrada = input("\nDigite o número do LOCAL desejado: ").strip()
     if entrada.isdigit() and 1 <= int(entrada) <= len(locais_validos):
         LOCAL_FILTRADO = locais_validos[int(entrada) - 1]
         break
-    else:
-        print("[X] Entrada inválida.")
+    print("[X] Entrada inválida.")
 
-# === SELECIONAR FUNÇÃO ===
-print(f"\n👤 Lista de FUNÇÕES permitidas:")
-for i, funcao in enumerate(funcoes_validas, start=1):
+print("\n👤 Funções disponíveis:")
+for i, funcao in enumerate(funcoes_validas, 1):
     print(f"[{i}] {funcao}")
-
 while True:
     entrada_funcao = input("\nDigite o número da FUNÇÃO desejada: ").strip()
     if entrada_funcao.isdigit() and 1 <= int(entrada_funcao) <= len(funcoes_validas):
         FUNCAO_FILTRADA = funcoes_validas[int(entrada_funcao) - 1]
         break
-    else:
-        print("[X] Entrada inválida.")
+    print("[X] Entrada inválida.")
 
-# === FILTRO ===
-df_filtrado = df[
-    (df['LOCAL'] == LOCAL_FILTRADO) &
-    (df['FUNCAO'] == FUNCAO_FILTRADA) &
-    (df['Enviar'] == True)
+# === VALIDAR HTML PARA FUNÇÃO ===
+if FUNCAO_FILTRADA not in df_html.index:
+    print(f"\n[X] Nenhum corpo HTML encontrado para a função: {FUNCAO_FILTRADA}")
+    exit()
+TEMPLATE_HTML = df_html.loc[FUNCAO_FILTRADA]['TEXTO']
+
+# === ASSUNTO PADRÃO ===
+ASSUNTO_EMAIL = "Avaliação Periódica de Desempenho e Competências para Gestores das Unidades Escolares da SME - Ciclo 2024"
+
+# === FILTRO DOS DADOS ===
+df_filtrado = df_dados[
+    (df_dados['LOCAL'] == LOCAL_FILTRADO) &
+    (df_dados['FUNCAO'] == FUNCAO_FILTRADA) &
+    (df_dados['Enviar'] == True)
 ]
 
 if df_filtrado.empty:
     print(f"\n[X] Nenhum registro encontrado para LOCAL '{LOCAL_FILTRADO}' e FUNÇÃO '{FUNCAO_FILTRADA}'")
     exit()
 
-print(f"\n🔎 {len(df_filtrado)} e-mail(s) encontrados para envio ou exibição.\n")
+print(f"\n🔎 {len(df_filtrado)} e-mail(s) prontos para envio ou exibição.\n")
 
-# === OUTLOOK ===
+# === CLIENTE OUTLOOK ===
 outlook = win32.Dispatch("Outlook.Application")
 
-# === LOG ===
+# === LOG DE ENVIO ===
 logs = []
 
 for _, row in df_filtrado.iterrows():
     nome = row['NOME']
     email = row['EMAIL']
-    funcao = row['FUNCAO']
     local = row['LOCAL']
+    funcao = row['FUNCAO']
     status = ""
     erro = ""
 
     try:
-        corpo_email = TEMPLATE_HTML.format(nome=nome, funcao=funcao)
+        corpo_email = TEMPLATE_HTML.replace("{nome}", nome)
 
         mail = outlook.CreateItem(0)
         mail.To = email
         mail.Subject = ASSUNTO_EMAIL
         mail.HTMLBody = corpo_email
 
-        if os.path.exists(CAMINHO_ANEXO):
-            mail.Attachments.Add(CAMINHO_ANEXO)
-        else:
-            erro = f"Anexo não encontrado: {CAMINHO_ANEXO}"
-            status = "erro"
-            print(f"[!] {erro}")
-            continue
+        # Anexar assinatura visual com Content-ID
+        imagem_assinatura = r"C:\Projetos_Python\Disparo_Emails\Assinatura.png"
+        if os.path.exists(imagem_assinatura):
+            attachment = mail.Attachments.Add(imagem_assinatura)
+            attachment.PropertyAccessor.SetProperty(
+                "http://schemas.microsoft.com/mapi/proptag/0x3712001F",
+                "assinatura_img"
+        )
 
+        # === BUSCAR ANEXOS POR FUNÇÃO ===
+        pasta_funcao = os.path.join(PASTA_ANEXOS, funcao)
+        if os.path.exists(pasta_funcao):
+            anexos = [os.path.join(pasta_funcao, f) for f in os.listdir(pasta_funcao) if os.path.isfile(os.path.join(pasta_funcao, f))]
+            for anexo in anexos:
+                mail.Attachments.Add(anexo)
+        else:
+            print(f"[!] Pasta de anexos não encontrada para: {funcao}")
+
+        # === ENVIAR OU EXIBIR ===
         if ENVIAR:
             mail.Send()
             status = "enviado"
@@ -135,8 +149,8 @@ for _, row in df_filtrado.iterrows():
             print(f"[👁️] E-mail EXIBIDO para: {email}")
 
     except Exception as e:
-        status = "erro"
         erro = str(e)
+        status = "erro"
         print(f"[X] Erro com {email}: {erro}")
 
     logs.append({
@@ -148,7 +162,7 @@ for _, row in df_filtrado.iterrows():
         "ERRO": erro
     })
 
-# === SALVA LOG ===
-nome_arquivo_log = f"log_envio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-pd.DataFrame(logs).to_csv(nome_arquivo_log, index=False, encoding='utf-8-sig')
-print(f"\n📁 LOG salvo com sucesso: {nome_arquivo_log}")
+# === SALVAR LOG ===
+nome_log = f"log_envio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+pd.DataFrame(logs).to_csv(nome_log, index=False, encoding='utf-8-sig')
+print(f"\n📁 LOG salvo em: {nome_log}")
